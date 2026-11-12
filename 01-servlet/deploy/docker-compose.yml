@@ -1,0 +1,28 @@
+# Starts the three application servers at the same time.
+# Inside Docker each server listens on 8080; we map a different port on your PC for each.
+#
+#   tomcat  (ui-service)     -> http://localhost:8080/ui      <- the only one you open in the browser
+#   jetty   (wallet-service) -> http://localhost:8081/wallet
+#   wildfly (games-service)  -> http://localhost:8082/games
+#
+# Containers reach each other by service name (e.g. http://jetty:8080/wallet),
+# NOT by localhost (localhost inside a container is the container itself).
+
+services:
+  tomcat:
+    build: ./tomcat
+    ports:
+      - "8080:8080"
+    environment:
+      WALLET_URL: http://jetty:8080/wallet
+      GAMES_URL: http://wildfly:8080/games
+
+  jetty:
+    build: ./jetty
+    ports:
+      - "8081:8080"
+
+  wildfly:
+    build: ./wildfly
+    ports:
+      - "8082:8080"

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_1.xsd"
+         version="6.1">
+
+    <display-name>wallet-service</display-name>
+
+    <!-- Declares the servlet and the URL it answers to.
+         Full URL = http://host:port/wallet + /api/accounts/... -->
+    <servlet>
+        <servlet-name>WalletServlet</servlet-name>
+        <servlet-class>casino.wallet.web.WalletServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>WalletServlet</servlet-name>
+        <url-pattern>/api/accounts/*</url-pattern>
+    </servlet-mapping>
+</web-app>

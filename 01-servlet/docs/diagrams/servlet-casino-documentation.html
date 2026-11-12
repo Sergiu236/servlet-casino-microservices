@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servlet Casino - Documentation</title>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: "Times New Roman", Times, serif; font-size: 12pt; line-height: 1.35; color: #000; background: #fff; max-width: 17cm; margin: 0 auto; padding: 1.5cm 1cm; }
+  h1, h2, h3, p, li, td, th, pre, code, figcaption { font-size: 12pt; }
+  h1 { font-size: 12pt; text-align: center; text-transform: uppercase; margin: 0.4cm 0; }
+  h2 { margin: 0.7cm 0 0.2cm; border-bottom: 1px solid #000; }
+  h3 { margin: 0.4cm 0 0.1cm; }
+  p { margin: 0.15cm 0; text-align: justify; }
+  ul, ol { margin: 0.1cm 0; padding-left: 0.8cm; }
+  code, pre { font-family: Consolas, "Courier New", monospace; }
+  pre { background: #f3f3f3; border: 1px solid #ccc; padding: 0.2cm; margin: 0.15cm 0; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin: 0.2cm 0; }
+  th, td { border: 1px solid #000; padding: 2px 6px; text-align: left; vertical-align: top; }
+  th { background: #e6e6e6; }
+  .head { text-align: center; margin-bottom: 0.5cm; }
+  .head p { text-align: center; margin: 0.05cm 0; }
+  figure { margin: 0.3cm 0; text-align: center; }
+  figcaption { font-style: italic; }
+  svg text { font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+  .proto { margin: 0.1cm 0 0.05cm; }
+  h2, h3 { break-after: avoid; }
+  figure, pre, tr { break-inside: avoid; }
+  @media print { body { padding: 0; max-width: none; } }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>Servlet Casino: a distributed application on Tomcat, Jetty and WildFly</h1>
+  <p><strong>Student:</strong> Sergiu Mocan &nbsp;&nbsp; <strong>Group:</strong> 244</p>
+  <p>Technologies and Java Platforms for Distributed Applications (TPJAD) - Servlet homework</p>
+</div>
+
+<h2>1. Overview</h2>
+<p>The application is a small casino with a slot machine. It is built from <strong>three servlet-based services</strong>. Each one is deployed in a <strong>different application server</strong> and they communicate with each other over <strong>HTTP</strong>, like small microservices.</p>
+<table>
+  <tr><th>Service</th><th>Server</th><th>Port</th><th>URL</th><th>Role</th></tr>
+  <tr><td>ui-service</td><td>Tomcat 11</td><td>8080</td><td>/ui</td><td>The only service used by the browser. Servlets and JSP pages, user session, calls the other two services.</td></tr>
+  <tr><td>wallet-service</td><td>Jetty 12.1</td><td>8081</td><td>/wallet</td><td>Holds the chip balance of each player (debit / credit).</td></tr>
+  <tr><td>games-service</td><td>WildFly 42</td><td>8082</td><td>/games</td><td>Slot machine logic: draws the reels and computes the payout.</td></tr>
+</table>
+<p>All three run at the same time, as Docker containers, and the WAR files are copied manually into each server (not deployed from an IDE). The technologies are Java 25, Jakarta Servlet 6.1 (Jakarta EE 11), JSP with EL, Maven (WAR packaging) and Gson (JSON parsing in ui-service only).</p>
+
+<h2>2. Theoretical aspects and solution adopted</h2>
+<ul>
+  <li><strong>Servlet:</strong> a Java class, extending <code>HttpServlet</code>, that handles HTTP requests inside a servlet container. Lifecycle: the container creates it, calls <code>init()</code> once, then <code>doGet</code> / <code>doPost</code> for each request (on many threads), and <code>destroy()</code> at shutdown.</li>
+  <li><strong>WAR and context path:</strong> a web application is packed as a <code>.war</code> file. The file name gives the context path (<code>ui.war</code> is served at <code>/ui</code>). Routes are declared in <code>WEB-INF/web.xml</code> (servlet name, class, <code>url-pattern</code>).</li>
+  <li><strong>WEB-INF:</strong> a directory defined by the Servlet specification that the server never serves directly. The JSP views are kept there, so they can only be reached through a servlet with <code>RequestDispatcher.forward</code>.</li>
+  <li><strong>Forward vs redirect:</strong> <code>forward</code> passes the same request to a JSP inside the server (URL unchanged, request attributes kept). <code>sendRedirect</code> makes the browser send a new request (used after a successful POST).</li>
+  <li><strong>Session:</strong> <code>HttpSession</code> keeps the logged-in username between requests of the same browser (30 minutes timeout).</li>
+  <li><strong>Communication:</strong> the services call each other with plain HTTP (<code>java.net.http.HttpClient</code>). Requests carry <code>application/x-www-form-urlencoded</code> parameters, answers are JSON. No token is needed because only ui-service is reachable from the browser.</li>
+  <li><strong>Layered design</strong> (in every service): <em>web</em> (servlets, HTTP only) &rarr; <em>application</em> (service with the use cases, DTOs) &rarr; <em>domain</em> (entities, exceptions, interfaces) &larr; <em>infrastructure</em> (implementations of the interfaces). The domain defines interfaces (<code>WalletClient</code>, <code>AccountRepository</code>, <code>SymbolSource</code>) and the infrastructure implements them, so storage or HTTP details can be changed without touching the business rules.</li>
+  <li><strong>Alternatives (not implemented):</strong> message queues (JMS / RabbitMQ) instead of direct HTTP calls, so services would not need to be online at the same time; JSON request bodies or JAX-RS instead of form parameters; a database for the balances; a token (JWT) between services; all code in a single WAR on one server.</li>
+</ul>
+
+<h2>3. Architecture</h2>
+<figure>
+<svg viewBox="0 0 640 300" width="100%" role="img" aria-label="Architecture diagram">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 z" fill="#000"/></marker>
+  </defs>
+  <rect x="10" y="110" width="110" height="60" fill="#fff" stroke="#000"/>
+  <text x="65" y="136" text-anchor="middle" font-weight="bold">Browser</text>
+  <text x="65" y="154" text-anchor="middle">user</text>
+
+  <rect x="200" y="90" width="190" height="100" fill="#eef3fb" stroke="#000"/>
+  <text x="295" y="112" text-anchor="middle" font-weight="bold">ui-service</text>
+  <text x="295" y="130" text-anchor="middle">Tomcat 11 - :8080 /ui</text>
+  <text x="295" y="150" text-anchor="middle">LoginServlet, PlayServlet,</text>
+  <text x="295" y="166" text-anchor="middle">LogoutServlet + JSP views</text>
+  <text x="295" y="182" text-anchor="middle">CasinoService</text>
+
+  <rect x="470" y="10" width="160" height="90" fill="#eef7ee" stroke="#000"/>
+  <text x="550" y="32" text-anchor="middle" font-weight="bold">wallet-service</text>
+  <text x="550" y="50" text-anchor="middle">Jetty 12.1 - :8081 /wallet</text>
+  <text x="550" y="70" text-anchor="middle">WalletServlet</text>
+  <text x="550" y="86" text-anchor="middle">balances (in memory)</text>
+
+  <rect x="470" y="200" width="160" height="90" fill="#fdf3e6" stroke="#000"/>
+  <text x="550" y="222" text-anchor="middle" font-weight="bold">games-service</text>
+  <text x="550" y="240" text-anchor="middle">WildFly 42 - :8082 /games</text>
+  <text x="550" y="260" text-anchor="middle">SlotsServlet</text>
+  <text x="550" y="276" text-anchor="middle">slot machine logic</text>
+
+  <line x1="120" y1="140" x2="198" y2="140" stroke="#000" marker-end="url(#arr)"/>
+  <text x="159" y="130" text-anchor="middle">HTTP</text>
+  <text x="159" y="160" text-anchor="middle">:8080</text>
+
+  <line x1="390" y1="120" x2="468" y2="70" stroke="#000" marker-end="url(#arr)"/>
+  <text x="415" y="80" text-anchor="middle">HTTP</text>
+  <line x1="390" y1="165" x2="468" y2="225" stroke="#000" marker-end="url(#arr)"/>
+  <text x="415" y="218" text-anchor="middle">HTTP</text>
+</svg>
+<figcaption>Figure 1. Architecture: the browser talks only to ui-service, which calls wallet-service (<code>http://jetty:8080/wallet</code>) and games-service (<code>http://wildfly:8080/games</code>) over HTTP.</figcaption>
+</figure>
+<p><strong>Deployment.</strong> <code>docker-compose.yml</code> starts the three containers. Inside Docker every server listens on 8080 and a different port is mapped on the host. Containers reach each other by service name (<code>http://jetty:8080/wallet</code>, <code>http://wildfly:8080/games</code>), not by <code>localhost</code>. The two addresses are passed to ui-service through the environment variables <code>WALLET_URL</code> and <code>GAMES_URL</code> (defaults: <code>localhost:8081</code> and <code>localhost:8082</code>).</p>
+<pre>01-servlet/
+  services/ui-service, wallet-service, games-service   (Maven projects: src/main/java, src/main/webapp)
+  deploy/tomcat, jetty, wildfly                        (Dockerfile + the WAR of that server)
+  deploy/docker-compose.yml                            (starts the three servers together)
+  deploy/tools/build-*.ps1                             (build a service and copy its WAR)</pre>
+
+<h2>4. Inputs and outputs</h2>
+<h3>4.1 ui-service (browser) - base URL <code>http://localhost:8080/ui</code></h3>
+<table>
+  <tr><th>Route</th><th>Method</th><th>Input</th><th>Output</th></tr>
+  <tr><td>/ (index.jsp)</td><td>GET</td><td>-</td><td>forwarded to /login</td></tr>
+  <tr><td>/login</td><td>GET</td><td>-</td><td>login page (or redirect to /play if already logged in)</td></tr>
+  <tr><td>/login</td><td>POST</td><td><code>username</code>: 1-30 letters, digits or _</td><td>redirect to /play; or login page with an error message</td></tr>
+  <tr><td>/play</td><td>GET</td><td>session</td><td>page with player name, balance, bet form; no session: redirect to /login</td></tr>
+  <tr><td>/play</td><td>POST</td><td><code>bet</code>: whole number, 1-500, not more than the balance</td><td>result page (reels, payout, new balance); or play page with an error</td></tr>
+  <tr><td>/logout</td><td>POST</td><td>-</td><td>session destroyed, redirect to /login</td></tr>
+</table>
+<h3>4.2 wallet-service - base URL <code>http://localhost:8081/wallet/api/accounts</code></h3>
+<table>
+  <tr><th>Request</th><th>Parameter</th><th>Success (200, JSON)</th><th>Errors</th></tr>
+  <tr><td>POST /</td><td>username</td><td><code>{"username":"..","balance":1000}</code> (new account starts with 1000)</td><td>400 invalid username</td></tr>
+  <tr><td>GET /{username}</td><td>-</td><td>account</td><td>404 unknown account</td></tr>
+  <tr><td>POST /{username}/debit</td><td>amount &gt; 0</td><td>account with new balance</td><td>400 invalid amount, 404 unknown account, 409 insufficient funds</td></tr>
+  <tr><td>POST /{username}/credit</td><td>amount &gt; 0</td><td>account with new balance</td><td>400 invalid amount, 404 unknown account</td></tr>
+</table>
+<p>Any other path returns 404. Errors have the form <code>{"error":"message"}</code>.</p>
+<h3>4.3 games-service - <code>POST http://localhost:8082/games/api/slots/spin</code></h3>
+<p>Input: <code>bet</code>, a whole number from 1 to 500. Output (200): <code>{"reels":["LEMON","CHERRY","BELL"],"bet":10,"payout":0,"win":false}</code>. Error: 400 with <code>{"error":"..."}</code> for a bet that is not a whole number or is outside the range.</p>
+<p><strong>Payout rule:</strong> three equal symbols pay <em>bet &times; multiplier</em> (CHERRY 5, LEMON 8, ORANGE 10, BELL 15, SEVEN 20); exactly two equal symbols give the bet back; three different symbols pay 0. <code>win</code> is true when payout &gt; 0.</p>
+
+<h2>5. Objects and methods</h2>
+<p>Only prototypes are given (name, parameters, return type, exceptions). Exceptions are unchecked (<code>RuntimeException</code>) unless noted. Getters and private helpers are omitted.</p>
+
+<h3>5.1 wallet-service (package <code>casino.wallet</code>)</h3>
+<p class="proto"><code>web.WalletServlet extends HttpServlet</code> - HTTP entry point; translates HTTP to <code>WalletService</code> calls and writes JSON. It contains no business rules. It maps <code>AccountNotFoundException</code> to 404, <code>InsufficientFundsException</code> to 409 and <code>IllegalArgumentException</code> to 400.</p>
+<pre>void init()
+void doGet(HttpServletRequest req,
+           HttpServletResponse resp) throws IOException
+void doPost(HttpServletRequest req,
+            HttpServletResponse resp) throws IOException</pre>
+<p><code>init()</code> runs once and creates the layers: <code>new WalletService(new InMemoryAccountRepository())</code>. <code>doGet</code> and <code>doPost</code> read the path (<code>getPathInfo()</code>) and the parameters <code>username</code> / <code>amount</code>.</p>
+
+<p class="proto"><code>application.WalletService</code> - the business rules. Its methods are <code>synchronized</code>, so "read balance, check, write balance" cannot be interleaved by two requests.</p>
+<pre>WalletService(AccountRepository repository)
+AccountDto createOrGet(String username)
+AccountDto get(String username)
+    throws AccountNotFoundException
+AccountDto debit(String username, long amount)
+    throws AccountNotFoundException, InsufficientFundsException
+AccountDto credit(String username, long amount)
+    throws AccountNotFoundException
+// createOrGet: existing account, or new one with 1000 chips
+// all methods: IllegalArgumentException if username is blank or
+// longer than 30, or amount &lt;= 0</pre>
+
+<p class="proto"><code>domain</code> - <code>Account</code> (record: <code>String username, long balance</code>, immutable; <code>Account withBalance(long newBalance)</code> returns a copy), <code>AccountRepository</code> (interface), <code>AccountNotFoundException(String username)</code>, <code>InsufficientFundsException(long balance, long amount)</code>.</p>
+<pre>interface AccountRepository {
+    Optional&lt;Account&gt; findByUsername(String username);
+    Account save(Account account);   // insert or replace
+}</pre>
+<p class="proto"><code>infrastructure.InMemoryAccountRepository implements AccountRepository</code> - accounts are stored in a <code>ConcurrentHashMap</code>; data is lost at restart. <code>application.AccountDto</code> is a record <code>(String username, long balance)</code> given to the servlet.</p>
+
+<h3>5.2 games-service (package <code>casino.games</code>)</h3>
+<p class="proto"><code>web.SlotsServlet extends HttpServlet</code> - maps to <code>/api/slots/spin</code>. Maps <code>IllegalArgumentException</code> to 400.</p>
+<pre>void init()   // creates GamesService(new RandomSymbolSource())
+void doPost(HttpServletRequest req,
+            HttpServletResponse resp) throws IOException</pre>
+<p class="proto"><code>application.GamesService</code> - validates the bet, draws 3 reels, computes the payout.</p>
+<pre>GamesService(SymbolSource symbolSource)
+SpinResultDto spin(long bet)
+    // IllegalArgumentException if bet &lt; 1 (MIN_BET) or &gt; 500 (MAX_BET)</pre>
+<p class="proto"><code>domain</code> - <code>enum Symbol</code> (CHERRY, LEMON, ORANGE, BELL, SEVEN; <code>int multiplier()</code>), <code>interface SymbolSource { Symbol next(); }</code>, <code>record SpinResult(List&lt;Symbol&gt; reels, long bet, long payout)</code> with <code>boolean isWin()</code>. <code>infrastructure.RandomSymbolSource</code> implements <code>SymbolSource</code> with <code>ThreadLocalRandom</code>; having it as an interface allows a fixed source in tests. <code>application.SpinResultDto</code> is a record <code>(List&lt;String&gt; reels, long bet, long payout, boolean win)</code>.</p>
+
+<h3>5.3 ui-service (package <code>casino.ui</code>)</h3>
+<p class="proto"><code>web.AppContextListener implements ServletContextListener</code> - runs once when the application starts.</p>
+<pre>void contextInitialized(ServletContextEvent event)</pre>
+<p>It reads <code>WALLET_URL</code> and <code>GAMES_URL</code>, builds one <code>CasinoService</code> and stores it in the <code>ServletContext</code> under the key <code>CASINO_SERVICE = "casinoService"</code>. Each servlet takes it in <code>init()</code>.</p>
+
+<p class="proto"><code>web.LoginServlet</code>, <code>web.PlayServlet</code>, <code>web.LogoutServlet</code> extend <code>HttpServlet</code> (routes <code>/login</code>, <code>/play</code>, <code>/logout</code>, declared in <code>web.xml</code>).</p>
+<pre>LoginServlet, PlayServlet:
+  void init()
+  void doGet(HttpServletRequest req, HttpServletResponse resp)
+      throws ServletException, IOException
+  void doPost(HttpServletRequest req, HttpServletResponse resp)
+      throws ServletException, IOException
+LogoutServlet:
+  void doPost(HttpServletRequest req, HttpServletResponse resp)
+      throws IOException</pre>
+<p>LoginServlet validates the user through <code>CasinoService.login</code>, stores <code>username</code> in the session and redirects to <code>/play</code>. PlayServlet checks the session, calls <code>getAccount</code> or <code>play</code>, and forwards to <code>play.jsp</code> or <code>result.jsp</code> with request attributes (<code>account</code>, <code>result</code>, <code>error</code>). If the account no longer exists (HTTP 404 from the wallet), the session is invalidated and the user returns to login. The views are <code>WEB-INF/jsp/login.jsp</code>, <code>play.jsp</code>, <code>result.jsp</code> (values are shown with EL, e.g. <code>${account.balance}</code>), plus the public <code>style.css</code>.</p>
+
+<p class="proto"><code>application.CasinoService</code> - the use cases of the UI.</p>
+<pre>CasinoService(WalletClient walletClient, GamesClient gamesClient)
+AccountDto login(String username)
+    // IllegalArgumentException if not [A-Za-z0-9_]{1,30};
+    // ServiceUnavailableException
+AccountDto getAccount(String username)
+    // AccountNotFoundException, ServiceUnavailableException
+PlayResultDto play(String username, long bet)
+    // AccountNotFoundException, InsufficientFundsException,
+    // IllegalArgumentException, ServiceUnavailableException</pre>
+<p class="proto"><code>domain</code> - interfaces implemented in the infrastructure layer, so <code>CasinoService</code> does not depend on HTTP:</p>
+<pre>interface WalletClient {
+    Account createOrGet(String username);
+    Account get(String username);
+    Account debit(String username, long amount);
+    Account credit(String username, long amount);
+}
+interface GamesClient { SpinResult spin(long bet); }
+record Account(String username, long balance)
+record SpinResult(List&lt;String&gt; reels, long bet, long payout)
+    // boolean isWin()
+exceptions (each with a String message constructor):
+    AccountNotFoundException, InsufficientFundsException,
+    ServiceUnavailableException</pre>
+<p class="proto"><code>infrastructure</code> - HTTP implementations:</p>
+<pre>HttpWalletClient(String baseUrl)    // implements WalletClient
+HttpGamesClient(String baseUrl)     // implements GamesClient
+HttpJsonClient(String serviceName, String baseUrl)
+    JsonResponse get(String path)
+    JsonResponse post(String path, Map&lt;String,String&gt; form)
+    // both throw ServiceUnavailableException
+record JsonResponse(int status, String body)
+    JsonObject json()
+    String errorMessage()</pre>
+<p><code>HttpJsonClient</code> uses <code>java.net.http.HttpClient</code> (connect timeout 3 s, request timeout 5 s). If the other service cannot be reached it throws <code>ServiceUnavailableException("Wallet service is not reachable")</code>, which the servlet shows as a message instead of crashing. The <code>Http*Client</code> classes translate HTTP status codes into exceptions: 400 &rarr; <code>IllegalArgumentException</code>, 404 &rarr; <code>AccountNotFoundException</code>, 409 &rarr; <code>InsufficientFundsException</code>, anything else &rarr; <code>ServiceUnavailableException</code>. DTOs for the JSPs: <code>AccountDto(String username, long balance)</code> and <code>PlayResultDto(List&lt;String&gt; reels, long bet, long payout, boolean win, long balance)</code>.</p>
+
+<h2>6. Processing flow</h2>
+<p><strong>Login.</strong> Browser &rarr; <code>POST /ui/login</code> &rarr; <code>LoginServlet</code> &rarr; <code>CasinoService.login</code> (validates the name) &rarr; <code>POST wallet/api/accounts</code> (creates the account with 1000 chips, or returns the existing one) &rarr; username saved in the session &rarr; redirect to <code>/play</code>.</p>
+<p><strong>Play</strong> (<code>CasinoService.play</code>):</p>
+<ol>
+  <li>wallet: <code>debit</code> the bet. If the balance is too low (409) the flow stops with an error message.</li>
+  <li>games: <code>spin</code> with the bet and get the reels and the payout.</li>
+  <li>If the games call fails, the bet is given back with a wallet <code>credit</code> (compensation) and the error is shown.</li>
+  <li>If the payout is greater than 0, wallet: <code>credit</code> the payout.</li>
+  <li>The servlet forwards to <code>result.jsp</code> with the reels, payout and the new balance.</li>
+</ol>
+
+<h2>7. Context of use</h2>
+<ul>
+  <li><strong>Requirements:</strong> Docker Desktop (to run the three servers), JDK 25 and Maven (only to rebuild the WARs), PowerShell for the build scripts.</li>
+  <li><strong>Server images:</strong> <code>tomcat:11.0-jdk25</code>, <code>jetty:12.1-jdk25</code> (with the <code>ee11-deploy</code> module), <code>quay.io/wildfly/wildfly:42.0.0.Final-jdk25</code>. All support Jakarta Servlet 6.1.</li>
+  <li><strong>Limits:</strong> balances are kept in memory and reset when wallet-service restarts; there is no password (a username is enough); ui-service must be able to reach the other two by network.</li>
+</ul>
+<p><strong>Build and run</strong> (from <code>01-servlet/deploy</code>):</p>
+<pre>.\tools\build-all.ps1          # builds the 3 WARs, copies them to the server folders
+docker compose up -d --build   # starts Tomcat, Jetty and WildFly
+docker compose ps              # all three must be "Up"
+docker compose down            # stop</pre>
+
+<h2>8. Usage examples</h2>
+<p><strong>Browser:</strong> open <code>http://localhost:8080/ui</code>, enter a username (e.g. <code>sergiu</code>), press <em>Play</em>, enter a bet and press <em>Spin</em>. The result page shows the three symbols, the payout and the new balance; <em>Play again</em> returns to the bet form.</p>
+<p><strong>Direct calls to the services</strong> (curl, real output from the running application):</p>
+<pre>$ curl -d username=sergiu_test \
+       http://localhost:8081/wallet/api/accounts
+{"username":"sergiu_test","balance":1000}
+$ curl -d amount=100 \
+       http://localhost:8081/wallet/api/accounts/sergiu_test/debit
+{"username":"sergiu_test","balance":900}
+$ curl -d bet=10 http://localhost:8082/games/api/slots/spin
+{"reels":["LEMON","CHERRY","BELL"],"bet":10,"payout":0,"win":false}</pre>
+
+<h2>9. Test battery</h2>
+<p>The tests are manual HTTP calls on the three running containers (a fresh start). The result column is what the application actually returned.</p>
+<table>
+  <tr><th>#</th><th>Test</th><th>Expected</th><th>Result</th></tr>
+  <tr><td>1</td><td>wallet: create account <code>sergiu_test</code></td><td>200, balance 1000</td><td>OK</td></tr>
+  <tr><td>2</td><td>wallet: get the same account</td><td>200, balance 1000</td><td>OK</td></tr>
+  <tr><td>3</td><td>wallet: debit 100, then credit 50</td><td>200, balance 900, then 950</td><td>OK</td></tr>
+  <tr><td>4</td><td>wallet: debit 999999</td><td>409 Insufficient funds</td><td>OK</td></tr>
+  <tr><td>5</td><td>wallet: debit 0 / debit <code>abc</code></td><td>400 (amount must be &gt; 0 / a whole number)</td><td>OK</td></tr>
+  <tr><td>6</td><td>wallet: unknown user / empty username</td><td>404 / 400</td><td>OK</td></tr>
+  <tr><td>7</td><td>games: spin bet 10</td><td>200, 3 reels, payout &ge; 0</td><td>OK</td></tr>
+  <tr><td>8</td><td>games: bet 0, bet 501, bet <code>abc</code></td><td>400 with error message</td><td>OK</td></tr>
+  <tr><td>9</td><td>ui: GET /ui/ and /ui/login</td><td>200 (login page)</td><td>OK</td></tr>
+  <tr><td>10</td><td>ui: GET /ui/play without a session</td><td>302 redirect to /ui/login</td><td>OK</td></tr>
+  <tr><td>11</td><td>ui: GET /ui/WEB-INF/web.xml</td><td>404 (WEB-INF is protected)</td><td>OK</td></tr>
+  <tr><td>12</td><td>ui: login <code>flow_user</code> &rarr; play page &rarr; bet 10</td><td>redirect to /play, balance 1000, result page</td><td>OK</td></tr>
+  <tr><td>13</td><td>ui: bet 99999 (more than balance)</td><td>play page with "Insufficient funds" message</td><td>OK</td></tr>
+  <tr><td>14</td><td>ui: login with <code>bad name!</code></td><td>login page with "Username must be 1-30 letters, digits or underscores"</td><td>OK</td></tr>
+  <tr><td>15</td><td>ui: login while the Jetty container is stopped</td><td>login page with "Wallet service is not reachable" (no crash)</td><td>OK</td></tr>
+</table>
+
+</body>
+</html>
